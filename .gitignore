@@ -1,2 +1,6 @@
 __pycache__
 *.pyc
+lock_and_key/
+resources/
+!resources/Crpto feeds.csv
+

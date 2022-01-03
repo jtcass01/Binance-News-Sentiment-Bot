@@ -1,6 +1,8 @@
+from typing import Dict
 
 # import for environment variables and waiting
-import os, time
+import time
+from os.path import join, dirname, isfile
 
 # used to parse XML feeds
 import xml.etree.ElementTree as ET
@@ -12,7 +14,7 @@ import aiohttp
 import asyncio
 
 # date modules that we'll most likely need
-from datetime import date, datetime, timedelta
+from datetime import datetime
 
 # used to grab the XML url list from a CSV file
 import csv
@@ -24,18 +26,15 @@ import json
 import numpy as np
 
 # nlp library to analyse sentiment
-import nltk
 import pytz
 from nltk.sentiment import SentimentIntensityAnalyzer
 
 # needed for the binance API
 from binance.client import Client
 from binance.enums import *
-from binance.exceptions import BinanceAPIException, BinanceOrderException
 
 # used for binance websocket
 from binance.websockets import BinanceSocketManager
-from twisted.internet import reactor
 
 # used for executing the code
 from itertools import count
@@ -43,28 +42,22 @@ from itertools import count
 # we use it to time our parser execution speed
 from timeit import default_timer as timer
 
+# Load Cipher to keep keys from existing on OS in plain text.
+from utilities.cipher import initialize_lock_and_key_ciphers, Cipher, load_resource
+CIPHERS: Dict[str, Cipher] = initialize_lock_and_key_ciphers()
+
 # Use testnet (change to True) or live (change to False)?
-testnet = True
+TEST_NET: bool = True
 
 # get binance key and secret from environment variables for testnet and live
-api_key_test = os.getenv('binance_api_stalkbot_testnet')
-api_secret_test = os.getenv('binance_secret_stalkbot_testnet')
-
-api_key_live = os.getenv('binance_api_stalkbot_live')
-api_secret_live = os.getenv('binance_secret_stalkbot_live')
+RESOURCE_DIRECTORY: str = join(dirname(__file__), "resources")
+API_KEYS: Dict[str, str] = load_resource(file_name_cipher=CIPHERS['file_name'],
+                                         data_cipher=CIPHERS['data'],
+                                         resource_file_name="binance.yaml")
+CRYPTO_FEEDS_RESOURCE_FILE_NAME: str = join(RESOURCE_DIRECTORY, "Crypto feeds.csv")
 
 # Authenticate with the client
-if testnet:
-    client = Client(api_key_test, api_secret_test)
-else:
-    client = Client(api_key_live, api_secret_live)
-
-# The API URL is manually changed in the library to work on the testnet
-if testnet:
-    client.API_URL = 'https://testnet.binance.vision/api'
-
-
-
+client = Client(API_KEYS["API Key"], API_KEYS["Secret Key"])
 
 ############################################
 #     USER INPUT VARIABLES LIVE BELOW      #
@@ -74,17 +67,18 @@ if testnet:
 
 # select what coins to look for as keywords in articles headlines
 # The key of each dict MUST be the symbol used for that coin on Binance
-# Use each list to define keywords separated by commas: 'XRP': ['ripple', 'xrp']
 # keywords are case sensitive
-keywords = {
-    'XRP': ['ripple', 'xrp', 'XRP', 'Ripple', 'RIPPLE'],
-    'BTC': ['BTC', 'bitcoin', 'Bitcoin', 'BITCOIN'],
-    'XLM': ['Stellar Lumens', 'XLM'],
-    #'BCH': ['Bitcoin Cash', 'BCH'],
-    'ETH': ['ETH', 'Ethereum'],
-    'BNB' : ['BNB', 'Binance Coin'],
-    'LTC': ['LTC', 'Litecoin']
-    }
+keywords = {'DOT': ['DOT', "Polkadot", "polkadot"],
+            'BTC': ['BTC', 'bitcoin', 'Bitcoin', 'BITCOIN'],
+            'ONE': ['Harmony', 'ONE'],
+            'ETH': ['ETH', 'Ethereum', "etereum", "Vitalik Buterin", "ETH2.0", "ETH2"],
+            'ADA': ["Cardano", "ADA", "cardano", "ada", "Charles Hoskinson"],
+            "ALGO": ["Algorand", "ALGO", "algo", "algorand"],
+            "ATOM": ["Cosmos", "ATOM", "atom", "COSMOS", "cosmos"],
+            'BNB' : ['BNB', 'Binance Coin', "binance coin"],
+            'SOL': ['SOL', 'Solana', "solana"],
+            'MATIC': ['Polygon', 'MATIC', 'polygon'],
+            "LINK": ["ChainLink", "chain link", "chainlink", "LINK"]}
 
 # The Buy amount in the PAIRING symbol, by default USDT
 # 100 will for example buy the equivalent of 100 USDT in Bitcoin.
@@ -114,26 +108,14 @@ REPEAT_EVERY = 60
 HOURS_PAST = 24
 
 
-############################################
-#        END OF USER INPUT VARIABLES       #
-#             Edit with care               #
-############################################
-
-
-
-
 # coins that bought by the bot since its start
 coins_in_hand  = {}
 
 # path to the saved coins_in_hand file
-coins_in_hand_file_path = 'coins_in_hand.json'
-
-# use separate files for testnet and live
-if testnet:
-    coins_in_hand_file_path = 'testnet_' + coins_in_hand_file_path
+coins_in_hand_file_path = join(RESOURCE_DIRECTORY, 'coins_in_hand.json')
 
 # if saved coins_in_hand json file exists then load it
-if os.path.isfile(coins_in_hand_file_path):
+if isfile(coins_in_hand_file_path):
     with open(coins_in_hand_file_path) as file:
         coins_in_hand = json.load(file)
 
@@ -204,11 +186,11 @@ def calculate_one_volume_from_lot_size(coin, amount):
 
 
 def calculate_volume():
-    while CURRENT_PRICE == {}:
-        print('Connecting to the socket...')
-        time.sleep(3)
+    #while CURRENT_PRICE == {}:
+    #    print('Connecting to the socket...')
+    #    time.sleep(3)
 
-    else:
+    #else:
         volume = {}
         for coin in CURRENT_PRICE:
             volume[coin] = float(QUANTITY / float(CURRENT_PRICE[coin]))
@@ -220,8 +202,7 @@ def calculate_volume():
 # load the csv file containg top 100 crypto feeds
 # want to scan other websites?
 # Simply add the RSS Feed url to the Crypto feeds.csv file
-with open('Crypto feeds.csv') as csv_file:
-
+with open(CRYPTO_FEEDS_RESOURCE_FILE_NAME) as csv_file:
     # open the file
     csv_reader = csv.reader(csv_file)
 
@@ -385,25 +366,22 @@ def buy(compiled_sentiment, headlines_analysed):
     '''Check if the sentiment is positive and keyword is found for each handle'''
     volume = calculate_volume()
     for coin in compiled_sentiment:
-
-
         # check if the sentiment and number of articles are over the given threshold
         if compiled_sentiment[coin] > SENTIMENT_THRESHOLD and headlines_analysed[coin] >= MINUMUM_ARTICLES and coins_in_hand[coin]==0:
             # check the volume looks correct
-            print(f'preparing to buy {volume[coin+PAIRING]} {coin} with {PAIRING} at {CURRENT_PRICE[coin+PAIRING]}')
-
-            if (testnet):
-                # create test order before pushing an actual order
-                test_order = client.create_test_order(symbol=coin+PAIRING, side='BUY', type='MARKET', quantity=volume[coin+PAIRING])
+            print(f'preparing to buy {volume[coin+PAIRING]} {coin} with {PAIRING} at {CURRENT_PRICE[coin+PAIRING]} for ${float(CURRENT_PRICE[coin+PAIRING])*float(volume[coin+PAIRING])}')
 
             # try to create a real order if the test orders did not raise an exception
             try:
-                buy_limit = client.create_order(
-                    symbol=coin+PAIRING,
-                    side='BUY',
-                    type='MARKET',
-                    quantity=volume[coin+PAIRING]
-                )
+                if TEST_NET:
+                    print(f"Placing {'MARKET'} {'BUY'} of {volume[coin+PAIRING]} {coin+PAIRING}")
+                else:
+                    buy_limit = client.create_order(
+                        symbol=coin+PAIRING,
+                        side='BUY',
+                        type='MARKET',
+                        quantity=volume[coin+PAIRING]
+                    )
 
             #error handling here in case position cannot be placed
             except Exception as e:
@@ -444,12 +422,14 @@ def sell(compiled_sentiment, headlines_analysed):
         if compiled_sentiment[coin] < NEGATIVE_SENTIMENT_THRESHOLD and headlines_analysed[coin] >= MINUMUM_ARTICLES and coins_in_hand[coin]>0:
 
             # check the volume looks correct
-            print(f'preparing to sell {coins_in_hand[coin]} {coin} at {CURRENT_PRICE[coin+PAIRING]}')
+            print(f'preparing to sell {coins_in_hand[coin]} {coin} at {CURRENT_PRICE[coin+PAIRING]} for ${coins_in_hand[coin]*CURRENT_PRICE[coin+PAIRING]} total.')
 
             amount_to_sell = calculate_one_volume_from_lot_size(coin+PAIRING, coins_in_hand[coin]*99.5/100)
 
-            if (testnet):
+            if TEST_NET:
                 # create test order before pushing an actual order
+                print(f"Placing {'MARKET'} {'SELL'} of {amount_to_sell} {coin+PAIRING}")
+            else:
                 test_order = client.create_test_order(symbol=coin+PAIRING, side='SELL', type='MARKET', quantity=amount_to_sell)
 
             # try to create a real order if the test orders did not raise an exception
