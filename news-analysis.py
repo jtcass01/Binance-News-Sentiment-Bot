@@ -1,7 +1,7 @@
 from typing import Dict
 
 # import for environment variables and waiting
-import time
+from time import sleep
 from os.path import join, dirname, isfile
 
 # used to parse XML feeds
@@ -77,7 +77,7 @@ keywords = {'DOT': ['DOT', "Polkadot", "polkadot"],
             "ATOM": ["Cosmos", "ATOM", "atom", "COSMOS", "cosmos"],
             'BNB' : ['BNB', 'Binance Coin', "binance coin"],
             'SOL': ['SOL', 'Solana', "solana"],
-            'MATIC': ['Polygon', 'MATIC', 'polygon'],
+            'MATIC': ['Polygon', 'MATIC', 'polygon', "Layer 2"],
             "LINK": ["ChainLink", "chain link", "chainlink", "LINK"]}
 
 # The Buy amount in the PAIRING symbol, by default USDT
@@ -91,8 +91,8 @@ PAIRING = 'USDT'
 # define how positive the news should be in order to place a trade
 # the number is a compound of neg, neu and pos values from the nltk analysis
 # input a number between -1 and 1
-SENTIMENT_THRESHOLD = 0
-NEGATIVE_SENTIMENT_THRESHOLD = 0
+SENTIMENT_THRESHOLD = 0.1
+NEGATIVE_SENTIMENT_THRESHOLD = -0.1
 
 # define the minimum number of articles that need to be analysed in order
 # for the sentiment analysis to qualify for a trade signal
@@ -101,7 +101,7 @@ MINUMUM_ARTICLES = 1
 
 # define how often to run the code (check for new + try to place trades)
 # in minutes
-REPEAT_EVERY = 60
+REPEAT_EVERY = 1.
 
 # define how old an article can be to be included
 # in hours
@@ -392,21 +392,22 @@ def buy(compiled_sentiment, headlines_analysed):
                 # adds coin to our portfolio
                 coins_in_hand[coin] += volume[coin+PAIRING]
 
-                # retrieve the last order
-                order = client.get_all_orders(symbol=coin+PAIRING, limit=1)
+                if not TEST_NET:
+                    # retrieve the last order
+                    order = client.get_all_orders(symbol=coin+PAIRING, limit=1)
 
-                if order:
-                    # convert order timsestamp into UTC format
-                    time = order[0]['time'] / 1000
-                    utc_time = datetime.fromtimestamp(time)
+                    if order:
+                        # convert order timsestamp into UTC format
+                        time = order[0]['time'] / 1000
+                        utc_time = datetime.fromtimestamp(time)
 
-                    # grab the price of CRYPTO the order was placed at for reporting
-                    bought_at = CURRENT_PRICE[coin+PAIRING]
+                        # grab the price of CRYPTO the order was placed at for reporting
+                        bought_at = CURRENT_PRICE[coin+PAIRING]
 
-                    # print order condirmation to the console
-                    print(f"order {order[0]['orderId']} has been placed on {coin} with {order[0]['origQty']} at {utc_time} and bought at {bought_at}")
-                else:
-                    print('Could not get last order from Binance!')
+                        # print order condirmation to the console
+                        print(f"order {order[0]['orderId']} has been placed on {coin} with {order[0]['origQty']} at {utc_time} and bought at {bought_at}")
+                    else:
+                        print('Could not get last order from Binance!')
 
         else:
             print(f'Sentiment not positive enough for {coin}, or not enough headlines analysed or already bought: {compiled_sentiment[coin]}, {headlines_analysed[coin]}')
@@ -447,23 +448,31 @@ def sell(compiled_sentiment, headlines_analysed):
 
             # run the else block if the position has been placed and return some info
             else:
-                # set coin to 0
-                coins_in_hand[coin]=0
                 # retrieve the last order
-                order = client.get_all_orders(symbol=coin+PAIRING, limit=1)
 
-                if order:
-                    # convert order timsestamp into UTC format
-                    time = order[0]['time'] / 1000
-                    utc_time = datetime.fromtimestamp(time)
+                if TEST_NET:
+                    utc_time = datetime.now()
 
-                    # grab the price of CRYPTO the order was placed at for reporting
                     sold_at = CURRENT_PRICE[coin+PAIRING]
 
-                    # print order condirmation to the console
-                    print(f"order {order[0]['orderId']} has been placed on {coin} with {order[0]['origQty']} coins sold for {sold_at} each at {utc_time}")
+                    print(f"order {0.} has been placed on {coin} with {coins_in_hand[coin]} coins sold for {sold_at} each at {utc_time}")
                 else:
-                    print('Could not get last order from Binance!')
+                    order = client.get_all_orders(symbol=coin+PAIRING, limit=1)
+
+                    if order:
+                        # convert order timsestamp into UTC format
+                        utc_time = datetime.fromtimestamp(order[0]['time'] / 1000.)
+
+                        # grab the price of CRYPTO the order was placed at for reporting
+                        sold_at = CURRENT_PRICE[coin+PAIRING]
+
+                        # print order condirmation to the console
+                        print(f"order {order[0]['orderId']} has been placed on {coin} with {order[0]['origQty']} coins sold for {sold_at} each at {utc_time}")
+                    else:
+                        print('Could not get last order from Binance!')
+                # set coin to 0
+                coins_in_hand[coin]=0
+
 
         else:
             print(f'Sentiment not negative enough for {coin}, not enough headlines analysed or not enough {coin} to sell: {compiled_sentiment[coin]}, {headlines_analysed[coin]}')
@@ -494,4 +503,4 @@ if __name__ == '__main__':
                 print(f'{coin}: {coins_in_hand[coin]}')
         save_coins_in_hand_to_file()
         print(f'\nIteration {i}')
-        time.sleep(60 * REPEAT_EVERY)
+        sleep(60 * REPEAT_EVERY)
