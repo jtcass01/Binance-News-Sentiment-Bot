@@ -42,6 +42,11 @@ from itertools import count
 # we use it to time our parser execution speed
 from timeit import default_timer as timer
 
+from urllib.request import Request, urlopen
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
 # Load Cipher to keep keys from existing on OS in plain text.
 from utilities.cipher import initialize_lock_and_key_ciphers, Cipher, load_resource
 CIPHERS: Dict[str, Cipher] = initialize_lock_and_key_ciphers()
@@ -232,7 +237,9 @@ async def get_feed_data(session, feed, headers):
     try:
         async with session.get(feed, headers=headers, timeout=60) as response:
             # define the root for our parsing
-            text = await response.text()
+            #text = await response.text()
+            req: Request = Request(feed, headers=headers)
+            text: str = urlopen(req).read()
             root = ET.fromstring(text)
 
             channel = root.find('channel/item/title').text
